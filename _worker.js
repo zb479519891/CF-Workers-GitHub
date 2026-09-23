@@ -94,7 +94,7 @@ function isAllowedTarget(url) {
   return url?.protocol === 'https:' && ALLOWED_HOSTS.has(url.hostname.toLowerCase());
 }
 
-function isSupportedPath(url) {
+function isSupportedPath(url, allowAssetHost = false) {
   const host = url.hostname.toLowerCase();
   const p = url.pathname;
 
@@ -118,7 +118,7 @@ function isSupportedPath(url) {
   if (host === 'release-assets.githubusercontent.com' ||
       host === 'objects.githubusercontent.com' ||
       host === 'github-releases.githubusercontent.com') {
-    return p.startsWith('/');
+    return allowAssetHost && p.startsWith('/');
   }
 
   return false;
@@ -210,12 +210,12 @@ function cacheable(request, config) {
   return true;
 }
 
-async function proxy(request, target, config, ctx, redirectCount = 0) {
+async function proxy(request, target, config, ctx, redirectCount = 0, allowAssetHost = false) {
   if (!isAllowedTarget(target)) {
     return errorResponse('Target host is not allowed.', 403, config.allowOrigin);
   }
 
-  if (!isSupportedPath(target)) {
+  if (!isSupportedPath(target, allowAssetHost)) {
     return errorResponse('Unsupported GitHub URL.', 400, config.allowOrigin);
   }
 
@@ -240,19 +240,22 @@ async function proxy(request, target, config, ctx, redirectCount = 0) {
       return new Response(null, { status: response.status, headers });
     }
 
-    return proxy(request, next, config, ctx, redirectCount + 1);
+    return proxy(request, next, config, ctx, redirectCount + 1, next.hostname === 'release-assets.githubusercontent.com' || next.hostname === 'objects.githubusercontent.com' || next.hostname === 'github-releases.githubusercontent.com');
   }
 
   const result = makeResponse(response, config);
+  const upstreamCacheControl = response.headers.get('cache-control') || '';
+  const canStore = response.status === 200 &&
+    !/\b(?:no-store|private)\b/i.test(upstreamCacheControl) &&
+    !response.headers.has('set-cookie') &&
+    !/\*/.test(response.headers.get('vary') || '');
 
-  if (cacheable(request, config) && response.ok) {
+  if (cacheable(request, config) && canStore) {
     const cache = caches.default;
     const cacheRequest = new Request(request.url, request);
-    // Set TTL before cloning so the cached response carries the intended policy.
     result.headers.set('cache-control', `public, max-age=${config.cacheTtl}`);
-    ctx.waitUntil(
-      cache.put(cacheRequest, result.clone()).catch(() => {})
-    );
+    result.headers.set('x-cf-github-cache', 'MISS');
+    ctx.waitUntil(cache.put(cacheRequest, result.clone()).catch(() => {}));
   }
 
   return result;
