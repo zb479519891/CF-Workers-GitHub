@@ -8,6 +8,7 @@
  * - 限制重定向次数
  * - 不污染全局 UA 黑名单
  * - 保留 Range / ETag / Last-Modified 等响应头
+ * - Release 下载跟随 GitHub 资产重定向，支持断点续传
  * - 支持环境变量：PREFIX / UA / URL / URL302 / CACHE_TTL / ALLOW_ORIGIN / JSDELIVR
  */
 
@@ -26,6 +27,9 @@ const ALLOWED_HOSTS = new Set([
   'raw.githubusercontent.com',
   'gist.github.com',
   'gist.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+  'objects.githubusercontent.com',
+  'github-releases.githubusercontent.com',
 ]);
 
 const STRIP_RESPONSE_HEADERS = new Set([
@@ -110,6 +114,13 @@ function isSupportedPath(url) {
     return /^\/[^/]+\/[^/]+\/.+/i.test(p);
   }
 
+  // GitHub Release assets / object storage: only reached through GitHub redirects.
+  if (host === 'release-assets.githubusercontent.com' ||
+      host === 'objects.githubusercontent.com' ||
+      host === 'github-releases.githubusercontent.com') {
+    return p.startsWith('/');
+  }
+
   return false;
 }
 
@@ -192,6 +203,8 @@ function makeResponse(upstream, config) {
 function cacheable(request, config) {
   if (!config.cacheTtl) return false;
   if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  // Cache API cannot store 206 responses. Let the origin/Cloudflare handle Range directly.
+  if (request.headers.has('range')) return false;
   if (request.headers.has('authorization')) return false;
   if (request.headers.has('cookie')) return false;
   return true;
@@ -219,7 +232,8 @@ async function proxy(request, target, config, ctx, redirectCount = 0) {
 
     const next = new URL(location, target);
     if (!isAllowedTarget(next)) {
-      // 保留外部重定向，但不在 Worker 内继续代理。
+      // GitHub release assets may redirect to dedicated GitHub-controlled asset hosts.
+      // Other external hosts are returned to the client and are never proxied.
       const headers = new Headers(response.headers);
       headers.set('location', next.href);
       for (const [k, v] of Object.entries(corsHeaders(config.allowOrigin))) headers.set(k, v);
@@ -234,11 +248,11 @@ async function proxy(request, target, config, ctx, redirectCount = 0) {
   if (cacheable(request, config) && response.ok) {
     const cache = caches.default;
     const cacheRequest = new Request(request.url, request);
-    const cacheResponse = result.clone();
-    ctx.waitUntil(
-      cache.put(cacheRequest, cacheResponse).catch(() => {})
-    );
+    // Set TTL before cloning so the cached response carries the intended policy.
     result.headers.set('cache-control', `public, max-age=${config.cacheTtl}`);
+    ctx.waitUntil(
+      cache.put(cacheRequest, result.clone()).catch(() => {})
+    );
   }
 
   return result;
