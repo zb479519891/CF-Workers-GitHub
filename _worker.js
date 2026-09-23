@@ -326,6 +326,10 @@ export default {
     const config = getConfig(env);
     const requestUrl = new URL(request.url);
 
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS') {
+      return errorResponse('Method Not Allowed.', 405, config.allowOrigin);
+    }
+
     if (isBlockedUA(request, config)) {
       return new Response(nginxPage(), {
         status: 200,
