@@ -45,8 +45,9 @@ GitHub 文件 / Release / Archive / Raw / Gist 的 Cloudflare Workers / Pages �
 
 1. Fork 本项目。
 2. 在 Cloudflare Pages 中连接 GitHub 仓库。
-3. 选择本仓库并部署。
-4. 绑定自己的自定义域名。
+3. 构建命令填写：echo "No build required"
+4. 选择本仓库并部署。
+5. 绑定自己的自定义域名。
 
 如果直接使用 Worker 编辑器，也可以把 `_worker.js` 内容部署到 Worker。
 
