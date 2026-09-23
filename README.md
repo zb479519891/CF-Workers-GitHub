@@ -8,6 +8,7 @@ GitHub 文件 / Release / Archive / Raw / Gist 的 Cloudflare Workers / Pages �
 - Release 下载自动跟随 GitHub 资产重定向。
 - 支持 Range / ETag / Last-Modified 等下载相关响应头。
 - GET / HEAD 使用 Cloudflare Cache API，默认缓存 1 小时。
+- 仅允许 GET / HEAD / OPTIONS，其他方法返回 405，降低误用风险。
 - 命中缓存时返回 `x-cf-github-cache: HIT`。
 - 最多跟随 5 次 GitHub 内部重定向，避免循环跳转。
 - Blob 链接自动转换为 Raw。
@@ -79,9 +80,9 @@ GitHub 文件 / Release / Archive / Raw / Gist 的 Cloudflare Workers / Pages �
 
 ## ⚡ 下载与缓存说明
 
-Release 文件通常会经历 GitHub 到 Release Asset 存储节点的重定向。当前版本会继续代理 GitHub 官方资产域名，而不是直接把用户甩到源站。
+Release 文件通常会经历 GitHub 到 Release Asset 存储节点的重定向。当前版本会继续代理 GitHub 官方资产域名；Release Asset 存储域名只能作为 GitHub 内部重定向后的目标，不能作为普通用户的初始代理目标。
 
-普通 GET / HEAD 请求会尝试使用 Cache API。带 `Authorization`、`Cookie` 或 `Range` 的请求不会进入 Worker Cache，以避免缓存私有内容或 206 响应。
+普通 GET / HEAD 请求会尝试使用 Cache API。带 `Authorization`、`Cookie` 或 `Range` 的请求不会进入 Worker Cache，以避免缓存私有内容或 206 响应。源站明确返回 `private` / `no-store`、Set-Cookie 或不适合共享缓存的 `Vary: *` 时，也不会写入 Worker Cache。
 
 Cloudflare 的 Cache API 支持根据 ETag / Last-Modified 进行条件匹配，并可以处理缓存对象的 Range 请求；Worker 本身不会人为生成 206 缓存响应。
 
